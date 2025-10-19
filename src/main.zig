@@ -45,7 +45,10 @@ pub fn main() !void {
     if (res.args.number) |n|
         requests = n;
 
-    const uri = std.Uri.parse(res.positionals[0] orelse unreachable) catch unreachable;
+    const uri = std.Uri.parse(res.positionals[0] orelse unreachable) catch |err| {
+        std.debug.print("invalid URL format: {}", .{err});
+        return;
+    };
 
     var pool: std.Thread.Pool = undefined;
     try pool.init(.{
@@ -59,7 +62,10 @@ pub fn main() !void {
 
     // Making first test request
     {
-        var test_req = try client.request(.GET, uri, .{});
+        var test_req = client.request(.GET, uri, .{}) catch |err| {
+            std.debug.print("failed to create request to \"{f}\": {}\n", .{ uri, err });
+            return;
+        };
         defer test_req.deinit();
         try test_req.sendBodiless();
         var test_buffer: [1024]u8 = undefined;
@@ -103,7 +109,17 @@ pub fn main() !void {
 
     std.mem.sort(u64, response_times, {}, comptime std.sort.asc(u64));
 
-    // TODO: Pretty print this
+    // TODO: Make this more like this:
+    // Latency Histogram:
+    // 141µs  273028  ■■■■■■■■■■■■■■■■■■■■■■■■
+    // 177µs  458955  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+    // 209µs  204717  ■■■■■■■■■■■■■■■■■■
+    // 235µs   26146  ■■
+    // 269µs    6029  ■
+    // 320µs     721
+    // 403µs      58
+    // 524µs       3
+
     std.debug.print("Min    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[0])) / 1_000});
     std.debug.print("Median : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests / 2])) / 1_000});
     std.debug.print("p90    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 90 / 100])) / 1_000});
