@@ -8,6 +8,7 @@ pub fn main() !void {
     var total_requests: usize = 1_000_000;
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
     const allocator = arena.allocator();
 
     const parsers = comptime .{
@@ -78,7 +79,7 @@ pub fn main() !void {
 
     var wg: std.Thread.WaitGroup = .{};
 
-    var parent_progress_node = std.Progress.start(.{ .root_name = "Making requests..." });
+    var parent_progress_node = std.Progress.start(.{ .root_name = "Making requests...", .estimated_total_items = total_requests });
 
     const workers = try allocator.alloc(Worker, concurrency);
     defer allocator.free(workers);
