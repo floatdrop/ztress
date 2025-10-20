@@ -120,8 +120,8 @@ pub fn main() !void {
         }
 
         const value = @as(f64, @floatFromInt(iter.highest_equivalent_value)) / value_scale;
-        std.debug.print("{d:10.2}µs {d: >6} ", .{ value, @as(usize, @intCast(count)) });
-        for (0..(@as(usize, @intCast(count)) * 50 / total_requests)) |_| {
+        std.debug.print("{d:10.2}µs {d: >6} |", .{ value, @as(usize, @intCast(count)) });
+        for (0..(@as(usize, @intCast(count)) * 60 / total_requests)) |_| {
             std.debug.print("■", .{});
         }
         std.debug.print("\n", .{});
