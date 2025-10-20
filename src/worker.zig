@@ -1,10 +1,13 @@
 const Worker = @This();
 const std = @import("std");
+const c = @cImport({
+    @cInclude("hdr/hdr_histogram.h");
+});
 
 allocator: std.mem.Allocator,
 client: std.http.Client,
 target: std.Uri,
-results: []u64, // TODO: Port HdrHistogram to zig
+response_time_histogram: [*c]c.hdr_histogram = undefined,
 progress: std.Progress.Node,
 
 failed_requsts: usize = 0,
@@ -23,31 +26,36 @@ fn makeRequest(self: *Worker, redirect_buffer: []u8) !u64 {
     return timer.lap();
 }
 
-pub fn run(self: *Worker) void {
+pub fn run(self: *Worker, requests_count: usize) void {
     var redirect_buffer: [1024]u8 = undefined;
 
-    for (self.results) |*result| {
+    for (0..requests_count) |_| {
         defer self.progress.completeOne();
-        result.* = self.makeRequest(&redirect_buffer) catch blk: {
+        const response_time = self.makeRequest(&redirect_buffer) catch blk: {
             self.failed_requsts += 1;
             break :blk 0;
         };
-    }
 
-    std.mem.sort(u64, self.results, {}, comptime std.sort.asc(u64));
+        if (!c.hdr_record_value(self.response_time_histogram, @as(i64, @intCast(response_time)))) {
+            @panic("failed to record response time to histogram");
+        }
+    }
 }
 
-pub fn init(allocator: std.mem.Allocator, target: std.Uri, requests: usize, progress: std.Progress.Node) !Worker {
-    return .{
+pub fn init(allocator: std.mem.Allocator, target: std.Uri, progress: std.Progress.Node) !Worker {
+    var worker: Worker = .{
         .allocator = allocator,
         .client = std.http.Client{ .allocator = allocator },
         .target = target,
-        .results = try allocator.alloc(u64, requests),
         .progress = progress,
     };
+    if (c.hdr_init(1, c.INT64_C(10_000_000000), 3, &worker.response_time_histogram) != 0) {
+        @panic("failed to initalize hdrhistogram");
+    }
+    return worker;
 }
 
 pub fn deinit(self: *Worker) void {
-    self.allocator.free(self.results);
+    c.hdr_close(self.response_time_histogram);
     self.client.deinit();
 }

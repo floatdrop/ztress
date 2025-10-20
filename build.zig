@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
     // in this directory.
 
     const clap = b.dependency("clap", .{});
+    const hdrhistogram = b.dependency("hdrhistogram_zig", .{});
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -64,6 +65,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.linkLibrary(hdrhistogram.artifact("hdrhistogram_c"));
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default

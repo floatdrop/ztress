@@ -36,6 +36,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
             .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
+        .hdrhistogram_zig = .{
+            .url = "https://github.com/floatdrop/hdrhistogram_zig/archive/1339825e0577d2adab69101d91edb032989741eb.tar.gz",
+            .hash = "hdrhistogram-0.0.0-EnLqiQsNAABWIzdAkQWDf0RtqJDaVtAomKkhtibWqcuO",
+        },
     },
     .paths = .{
         "build.zig",

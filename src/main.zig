@@ -2,14 +2,13 @@ const std = @import("std");
 const clap = @import("clap");
 const Worker = @import("worker.zig");
 const http = std.http;
+const c = @cImport({
+    @cInclude("hdr/hdr_histogram.h");
+});
 
 pub fn main() !void {
-    var concurrency: usize = 10;
-    var total_requests: usize = 1_000_000;
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
     const parsers = comptime .{
         .URL = clap.parsers.string,
@@ -41,10 +40,8 @@ pub fn main() !void {
         return clap.helpToFile(.stdout(), clap.Help, &params, .{});
     }
 
-    if (res.args.concurrency) |c|
-        concurrency = c;
-    if (res.args.number) |n|
-        total_requests = n;
+    const concurrency = res.args.concurrency orelse 10;
+    const total_requests = res.args.number orelse 1_000_000;
 
     const uri = std.Uri.parse(res.positionals[0] orelse unreachable) catch |err| {
         std.debug.print("invalid URL format: {}", .{err});
@@ -87,18 +84,30 @@ pub fn main() !void {
     var remaining_requests = total_requests;
     for (workers) |*worker| {
         const worker_requests = @min(total_requests / concurrency, remaining_requests);
-        worker.* = try Worker.init(allocator, uri, worker_requests, parent_progress_node);
-        pool.spawnWg(&wg, Worker.run, .{worker});
+        worker.* = try Worker.init(allocator, uri, parent_progress_node);
+        pool.spawnWg(&wg, Worker.run, .{ worker, worker_requests });
         remaining_requests -= worker_requests;
     }
 
     wg.wait();
 
+    var response_time_histogram: [*c]c.hdr_histogram = undefined;
+    if (c.hdr_init(1, c.INT64_C(10_000_000000), 3, &response_time_histogram) != 0) {
+        @panic("failed to initalize hdrhistogram");
+    }
+    defer c.hdr_close(response_time_histogram);
+
     for (workers) |*worker| {
+        if (c.hdr_add(response_time_histogram, @ptrCast(worker.response_time_histogram)) != 0) {
+            @panic("failed to summarize histograms");
+        }
         worker.deinit();
     }
 
     parent_progress_node.end();
+
+    std.debug.print("Response time histogram (in ms):\n\n", .{});
+    _ = c.hdr_percentiles_print(response_time_histogram, c.stdout(), 1, 1_000_000, c.CLASSIC);
 
     // TODO: Make this more like this:
     // Latency Histogram:
@@ -110,12 +119,4 @@ pub fn main() !void {
     // 320µs     721
     // 403µs      58
     // 524µs       3
-
-    // std.debug.print("Min    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[0])) / 1_000});
-    // std.debug.print("Median : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests / 2])) / 1_000});
-    // std.debug.print("p90    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 90 / 100])) / 1_000});
-    // std.debug.print("p99    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 99 / 100])) / 1_000});
-    // std.debug.print("p99.9  : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 999 / 1000])) / 1_000});
-    // std.debug.print("p99.99 : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 9999 / 10000])) / 1_000});
-    // std.debug.print("Max    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests - 1])) / 1_000});
 }
