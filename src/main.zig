@@ -1,14 +1,14 @@
 const std = @import("std");
 const clap = @import("clap");
+const Worker = @import("worker.zig");
 const http = std.http;
 
 pub fn main() !void {
     var concurrency: usize = 10;
-    var requests: usize = 1_000_000;
+    var total_requests: usize = 1_000_000;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer if (gpa.deinit() != .ok) @panic("leak");
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena.allocator();
 
     const parsers = comptime .{
         .URL = clap.parsers.string,
@@ -25,7 +25,7 @@ pub fn main() !void {
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, parsers, .{
         .diagnostic = &diag,
-        .allocator = gpa.allocator(),
+        .allocator = allocator,
     }) catch |err| {
         // Report useful error and exit.
         try diag.reportToFile(.stderr(), err);
@@ -43,7 +43,7 @@ pub fn main() !void {
     if (res.args.concurrency) |c|
         concurrency = c;
     if (res.args.number) |n|
-        requests = n;
+        total_requests = n;
 
     const uri = std.Uri.parse(res.positionals[0] orelse unreachable) catch |err| {
         std.debug.print("invalid URL format: {}", .{err});
@@ -78,36 +78,26 @@ pub fn main() !void {
 
     var wg: std.Thread.WaitGroup = .{};
 
-    var parent_progress_node = std.Progress.start(.{ .root_name = "Making requests...", .estimated_total_items = requests });
+    var parent_progress_node = std.Progress.start(.{ .root_name = "Making requests..." });
 
-    // TODO: Use HdrHistogram for better memory consumption?
-    var response_times: []u64 = try allocator.alloc(u64, requests);
-    defer allocator.free(response_times);
+    const workers = try allocator.alloc(Worker, concurrency);
+    defer allocator.free(workers);
 
-    for (0..requests) |i| {
-        pool.spawnWg(&wg, struct {
-            fn run(c: *http.Client, target: std.Uri, progress: *std.Progress.Node, time: *u64) void {
-                defer progress.completeOne();
-
-                var timer = std.time.Timer.start() catch @panic("need timer to work");
-
-                var req = c.request(.GET, target, .{}) catch @panic("http client failed to initialize request");
-                defer req.deinit();
-
-                req.sendBodiless() catch @panic("http client failed to send bodiless request");
-
-                var redirect_buffer: [1024]u8 = undefined;
-                var resp = req.receiveHead(&redirect_buffer) catch @panic("http client failed to read headers");
-                _ = resp.reader(&.{}).discardRemaining() catch @panic("http client failed to discard body");
-
-                time.* = timer.lap();
-            }
-        }.run, .{ &client, uri, &parent_progress_node, &response_times[i] });
+    var remaining_requests = total_requests;
+    for (workers) |*worker| {
+        const worker_requests = @min(total_requests / concurrency, remaining_requests);
+        worker.* = try Worker.init(allocator, uri, worker_requests, parent_progress_node);
+        pool.spawnWg(&wg, Worker.run, .{worker});
+        remaining_requests -= worker_requests;
     }
-    wg.wait();
-    parent_progress_node.end();
 
-    std.mem.sort(u64, response_times, {}, comptime std.sort.asc(u64));
+    wg.wait();
+
+    for (workers) |*worker| {
+        worker.deinit();
+    }
+
+    parent_progress_node.end();
 
     // TODO: Make this more like this:
     // Latency Histogram:
@@ -120,11 +110,11 @@ pub fn main() !void {
     // 403µs      58
     // 524µs       3
 
-    std.debug.print("Min    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[0])) / 1_000});
-    std.debug.print("Median : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests / 2])) / 1_000});
-    std.debug.print("p90    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 90 / 100])) / 1_000});
-    std.debug.print("p99    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 99 / 100])) / 1_000});
-    std.debug.print("p99.9  : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 999 / 1000])) / 1_000});
-    std.debug.print("p99.99 : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 9999 / 10000])) / 1_000});
-    std.debug.print("Max    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests - 1])) / 1_000});
+    // std.debug.print("Min    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[0])) / 1_000});
+    // std.debug.print("Median : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests / 2])) / 1_000});
+    // std.debug.print("p90    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 90 / 100])) / 1_000});
+    // std.debug.print("p99    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 99 / 100])) / 1_000});
+    // std.debug.print("p99.9  : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 999 / 1000])) / 1_000});
+    // std.debug.print("p99.99 : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests * 9999 / 10000])) / 1_000});
+    // std.debug.print("Max    : {d:6.3}µs\n", .{@as(f32, @floatFromInt(response_times[requests - 1])) / 1_000});
 }
