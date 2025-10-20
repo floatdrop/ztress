@@ -69,9 +69,12 @@ pub fn main() !void {
         stream.close();
     }
 
+    std.debug.print("{f} is ok.\n", .{uri});
+
     var wg: std.Thread.WaitGroup = .{};
 
-    var parent_progress_node = std.Progress.start(.{ .root_name = "Making requests...", .estimated_total_items = total_requests });
+    const title = try std.fmt.allocPrint(allocator, "Benchmarking with {d} threads...", .{concurrency});
+    var parent_progress_node = std.Progress.start(.{ .root_name = title, .estimated_total_items = total_requests });
 
     const workers = try allocator.alloc(Worker, concurrency);
     defer allocator.free(workers);
