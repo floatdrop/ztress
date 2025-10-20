@@ -19,10 +19,6 @@ Usage: zstress [-h] [-c <usize>] [-n <usize>] <URL>
             Stress test target url.
 ```
 
-## Installation
-
-Download prebuild binary from [releases](https://github.com/floatdrop/ztress/releases) or build it yourself.
-
 ## Building
 
 Download [Zig](https://ziglang.org) and run:
