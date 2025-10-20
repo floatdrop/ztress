@@ -58,20 +58,15 @@ pub fn main() !void {
     var client = http.Client{ .allocator = allocator };
     defer client.deinit();
 
-    // Making first test request
+    // Test host and port availability
     {
-        var test_req = client.request(.GET, uri, .{}) catch |err| {
-            std.debug.print("failed to create request to \"{f}\": {}\n", .{ uri, err });
+        var host_buf: [std.Uri.host_name_max]u8 = undefined;
+        const host = try uri.getHost(&host_buf);
+        var stream = std.net.tcpConnectToHost(allocator, host, uri.port.?) catch |err| {
+            std.debug.print("failed to connect to {s}:{d} - {}\n", .{ host, uri.port.?, err });
             return;
         };
-        defer test_req.deinit();
-        try test_req.sendBodiless();
-        var test_buffer: [1024]u8 = undefined;
-        const test_resp = try test_req.receiveHead(&test_buffer);
-        if (test_resp.head.status != .ok) {
-            std.debug.print("{f} returned {}, but expected .ok – check that service is ok. bye.\n", .{ uri, test_resp.head.status });
-            return;
-        }
+        stream.close();
     }
 
     var wg: std.Thread.WaitGroup = .{};
