@@ -106,17 +106,21 @@ pub fn main() !void {
 
     parent_progress_node.end();
 
-    std.debug.print("Response time histogram (in ms):\n\n", .{});
-    _ = c.hdr_percentiles_print(response_time_histogram, c.stdout(), 1, 1_000_000, c.CLASSIC);
+    const value_scale = 1_000.0; // µs
+    std.debug.print("Latency Histogram:\n", .{});
 
-    // TODO: Make this more like this:
-    // Latency Histogram:
-    // 141µs  273028  ■■■■■■■■■■■■■■■■■■■■■■■■
-    // 177µs  458955  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-    // 209µs  204717  ■■■■■■■■■■■■■■■■■■
-    // 235µs   26146  ■■
-    // 269µs    6029  ■
-    // 320µs     721
-    // 403µs      58
-    // 524µs       3
+    var iter: c.hdr_iter = undefined;
+    c.hdr_iter_percentile_init(&iter, response_time_histogram, 1);
+
+    var prev_cum_count: i64 = 0;
+    while (c.hdr_iter_next(&iter)) {
+        const count = iter.cumulative_count - prev_cum_count;
+        const value = @as(f64, @floatFromInt(iter.highest_equivalent_value)) / value_scale;
+        std.debug.print("{d:10.2}µs {d: >6} ", .{ value, @as(usize, @intCast(count)) });
+        for (0..(@as(usize, @intCast(count)) * 50 / total_requests)) |_| {
+            std.debug.print("■", .{});
+        }
+        std.debug.print("\n", .{});
+        prev_cum_count = iter.cumulative_count;
+    }
 }
